@@ -21,6 +21,16 @@ pub(crate) struct State {
     singleline_offset: f32,
 }
 
+impl State {
+    pub fn load(ctx: &Context, id: Id) -> Option<Self> {
+        ctx.memory().id_data.get_persisted(id)
+    }
+
+    pub fn store(self, ctx: &Context, id: Id) {
+        ctx.memory().id_data.insert_persisted(id, self)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct CursorPair {
@@ -433,10 +443,7 @@ impl<'t> TextEdit<'t> {
 
 impl<'t> TextEdit<'t> {
     pub fn cursor(ui: &Ui, id: Id) -> Option<CursorPair> {
-        ui.memory()
-            .id_data
-            .get::<State>(&id)
-            .and_then(|state| state.cursorp)
+        State::load(ui.ctx(), id).and_then(|state| state.cursorp)
     }
 }
 
@@ -589,7 +596,7 @@ impl<'t> TextEdit<'t> {
                 auto_id // Since we are only storing the cursor a persistent Id is not super important
             }
         });
-        let mut state = ui.memory().id_data.get_or_default::<State>(id).clone();
+        let mut state = State::load(ui.ctx(), id).unwrap_or_default().clone();
 
         let sense = if interactive {
             Sense::click_and_drag()
@@ -906,7 +913,7 @@ impl<'t> TextEdit<'t> {
             }
         }
 
-        ui.memory().id_data.insert(id, state);
+        state.store(ui.ctx(), id);
 
         let selection_changed = if let (Some(text_cursor), Some(prev_text_cursor)) =
             (text_cursor, prev_text_cursor)
