@@ -23,11 +23,11 @@ pub(crate) struct State {
 
 impl State {
     pub fn load(ctx: &Context, id: Id) -> Option<Self> {
-        ctx.memory().id_data.get_persisted(id)
+        ctx.memory().data.get_persisted(id)
     }
 
     pub fn store(self, ctx: &Context, id: Id) {
-        ctx.memory().id_data.insert_persisted(id, self)
+        ctx.memory().data.insert_persisted(id, self);
     }
 }
 
@@ -596,7 +596,7 @@ impl<'t> TextEdit<'t> {
                 auto_id // Since we are only storing the cursor a persistent Id is not super important
             }
         });
-        let mut state = State::load(ui.ctx(), id).unwrap_or_default().clone();
+        let mut state = State::load(ui.ctx(), id).unwrap_or_default();
 
         let sense = if interactive {
             Sense::click_and_drag()
