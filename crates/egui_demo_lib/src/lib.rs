@@ -10,14 +10,12 @@
 
 #![allow(clippy::float_cmp)]
 #![allow(clippy::manual_range_contains)]
-#![cfg_attr(feature = "puffin", deny(unsafe_code))]
-#![cfg_attr(not(feature = "puffin"), forbid(unsafe_code))]
 
 mod demo;
 pub mod easy_mark;
 mod rendering_test;
 
-pub use demo::{DemoWindows, WidgetGallery};
+pub use demo::{Demo, DemoWindows, View, WidgetGallery};
 pub use rendering_test::ColorTest;
 
 /// View some Rust code with syntax highlighting and selection.

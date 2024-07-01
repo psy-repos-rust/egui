@@ -250,7 +250,11 @@ impl Frame {
         inner_rect.max.x = inner_rect.max.x.max(inner_rect.min.x);
         inner_rect.max.y = inner_rect.max.y.max(inner_rect.min.y);
 
-        let content_ui = ui.child_ui(inner_rect, *ui.layout());
+        let content_ui = ui.child_ui(
+            inner_rect,
+            *ui.layout(),
+            Some(UiStackInfo::new(UiKind::Frame).with_frame(self)),
+        );
 
         // content_ui.set_clip_rect(outer_rect_bounds.shrink(self.stroke.width * 0.5)); // Can't do this since we don't know final size yet
 
@@ -266,7 +270,8 @@ impl Frame {
         self.show_dyn(ui, Box::new(add_contents))
     }
 
-    fn show_dyn<'c, R>(
+    /// Show using dynamic dispatch.
+    pub fn show_dyn<'c, R>(
         self,
         ui: &mut Ui,
         add_contents: Box<dyn FnOnce(&mut Ui) -> R + 'c>,
@@ -306,7 +311,7 @@ impl Prepared {
         self.content_ui.min_rect() + self.frame.inner_margin + self.frame.outer_margin
     }
 
-    /// Allocate the the space that was used by [`Self::content_ui`].
+    /// Allocate the space that was used by [`Self::content_ui`].
     ///
     /// This MUST be called, or the parent ui will not know how much space this widget used.
     ///

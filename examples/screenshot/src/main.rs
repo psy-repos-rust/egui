@@ -1,10 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+#![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
 use std::sync::Arc;
 
 use eframe::egui::{self, ColorImage};
 
-fn main() -> Result<(), eframe::Error> {
+fn main() -> eframe::Result {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
@@ -13,7 +14,7 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "Take screenshots and display with eframe/egui",
         options,
-        Box::new(|_cc| Box::<MyApp>::default()),
+        Box::new(|_cc| Ok(Box::<MyApp>::default())),
     )
 }
 

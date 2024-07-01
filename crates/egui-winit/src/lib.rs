@@ -22,6 +22,7 @@ mod window_settings;
 
 pub use window_settings::WindowSettings;
 
+use ahash::HashSet;
 use raw_window_handle::HasDisplayHandle;
 
 #[allow(unused_imports)]
@@ -29,6 +30,7 @@ pub(crate) use profiling_scopes::*;
 
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
+    event::ElementState,
     event_loop::EventLoopWindowTarget,
     window::{CursorGrabMode, Window, WindowButtons, WindowLevel},
 };
@@ -54,7 +56,7 @@ pub struct EventResponse {
     /// (e.g. a mouse click on an egui window, or entering text into a text field).
     ///
     /// For instance, if you use egui for a game, you should only
-    /// pass on the events to your game when [`Self::consumed`] is `false.
+    /// pass on the events to your game when [`Self::consumed`] is `false`.
     ///
     /// Note that egui uses `tab` to move focus between elements, so this will always be `true` for tabs.
     pub consumed: bool,
@@ -93,7 +95,7 @@ pub struct State {
     pointer_touch_id: Option<u64>,
 
     /// track ime state
-    input_method_editor_started: bool,
+    has_sent_ime_enabled: bool,
 
     #[cfg(feature = "accesskit")]
     accesskit: Option<accesskit_winit::Adapter>,
@@ -134,7 +136,7 @@ impl State {
             simulate_touch_screen: false,
             pointer_touch_id: None,
 
-            input_method_editor_started: false,
+            has_sent_ime_enabled: false,
 
             #[cfg(feature = "accesskit")]
             accesskit: None,
@@ -340,23 +342,25 @@ impl State {
                 // We use input_method_editor_started to manually insert CompositionStart
                 // between Commits.
                 match ime {
-                    winit::event::Ime::Enabled | winit::event::Ime::Disabled => (),
+                    winit::event::Ime::Enabled => {}
+                    winit::event::Ime::Preedit(_, None) => {
+                        self.ime_event_enable();
+                    }
+                    winit::event::Ime::Preedit(text, Some(_cursor)) => {
+                        self.ime_event_enable();
+                        self.egui_input
+                            .events
+                            .push(egui::Event::Ime(egui::ImeEvent::Preedit(text.clone())));
+                    }
                     winit::event::Ime::Commit(text) => {
-                        self.input_method_editor_started = false;
                         self.egui_input
                             .events
-                            .push(egui::Event::CompositionEnd(text.clone()));
+                            .push(egui::Event::Ime(egui::ImeEvent::Commit(text.clone())));
+                        self.ime_event_disable();
                     }
-                    winit::event::Ime::Preedit(text, Some(_)) => {
-                        if !self.input_method_editor_started {
-                            self.input_method_editor_started = true;
-                            self.egui_input.events.push(egui::Event::CompositionStart);
-                        }
-                        self.egui_input
-                            .events
-                            .push(egui::Event::CompositionUpdate(text.clone()));
+                    winit::event::Ime::Disabled => {
+                        self.ime_event_disable();
                     }
-                    winit::event::Ime::Preedit(_, None) => {}
                 };
 
                 EventResponse {
@@ -364,16 +368,31 @@ impl State {
                     consumed: self.egui_ctx.wants_keyboard_input(),
                 }
             }
-            WindowEvent::KeyboardInput { event, .. } => {
-                self.on_keyboard_input(event);
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic,
+                ..
+            } => {
+                // Winit generates fake "synthetic" KeyboardInput events when the focus
+                // is changed to the window, or away from it. Synthetic key presses
+                // represent no real key presses and should be ignored.
+                // See https://github.com/rust-windowing/winit/issues/3543
+                if *is_synthetic && event.state == ElementState::Pressed {
+                    EventResponse {
+                        repaint: true,
+                        consumed: false,
+                    }
+                } else {
+                    self.on_keyboard_input(event);
 
-                // When pressing the Tab key, egui focuses the first focusable element, hence Tab always consumes.
-                let consumed = self.egui_ctx.wants_keyboard_input()
-                    || event.logical_key
-                        == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab);
-                EventResponse {
-                    repaint: true,
-                    consumed,
+                    // When pressing the Tab key, egui focuses the first focusable element, hence Tab always consumes.
+                    let consumed = self.egui_ctx.wants_keyboard_input()
+                        || event.logical_key
+                            == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab);
+                    EventResponse {
+                        repaint: true,
+                        consumed,
+                    }
                 }
             }
             WindowEvent::Focused(focused) => {
@@ -472,6 +491,22 @@ impl State {
                 }
             }
         }
+    }
+
+    pub fn ime_event_enable(&mut self) {
+        if !self.has_sent_ime_enabled {
+            self.egui_input
+                .events
+                .push(egui::Event::Ime(egui::ImeEvent::Enabled));
+            self.has_sent_ime_enabled = true;
+        }
+    }
+
+    pub fn ime_event_disable(&mut self) {
+        self.egui_input
+            .events
+            .push(egui::Event::Ime(egui::ImeEvent::Disabled));
+        self.has_sent_ime_enabled = false;
     }
 
     pub fn on_mouse_motion(&mut self, delta: (f64, f64)) {
@@ -599,7 +634,8 @@ impl State {
         });
         // If we're not yet translating a touch or we're translating this very
         // touch …
-        if self.pointer_touch_id.is_none() || self.pointer_touch_id.unwrap() == touch.id {
+        if self.pointer_touch_id.is_none() || self.pointer_touch_id.unwrap_or_default() == touch.id
+        {
             // … emit PointerButton resp. PointerMoved events to emulate mouse
             match touch.phase {
                 winit::event::TouchPhase::Started => {
@@ -657,29 +693,6 @@ impl State {
                 modifiers,
             });
         }
-        let delta = match delta {
-            winit::event::MouseScrollDelta::LineDelta(x, y) => {
-                let points_per_scroll_line = 50.0; // Scroll speed decided by consensus: https://github.com/emilk/egui/issues/461
-                egui::vec2(x, y) * points_per_scroll_line
-            }
-            winit::event::MouseScrollDelta::PixelDelta(delta) => {
-                egui::vec2(delta.x as f32, delta.y as f32) / pixels_per_point
-            }
-        };
-
-        if self.egui_input.modifiers.ctrl || self.egui_input.modifiers.command {
-            // Treat as zoom instead:
-            let factor = (delta.y / 200.0).exp();
-            self.egui_input.events.push(egui::Event::Zoom(factor));
-        } else if self.egui_input.modifiers.shift {
-            // Treat as horizontal scrolling.
-            // Note: one Mac we already get horizontal scroll events when shift is down.
-            self.egui_input
-                .events
-                .push(egui::Event::Scroll(egui::vec2(delta.x + delta.y, 0.0)));
-        } else {
-            self.egui_input.events.push(egui::Event::Scroll(delta));
-        }
     }
 
     fn on_keyboard_input(&mut self, event: &winit::event::KeyEvent) {
@@ -727,15 +740,19 @@ impl State {
             physical_key
         );
 
-        if let Some(logical_key) = logical_key {
+        // "Logical OR physical key" is a fallback mechanism for keyboard layouts without Latin characters: it lets them
+        // emit events as if the corresponding keys from the Latin layout were pressed. In this case, clipboard shortcuts
+        // are mapped to the physical keys that normally contain C, X, V, etc.
+        // See also: https://github.com/emilk/egui/issues/3653
+        if let Some(active_key) = logical_key.or(physical_key) {
             if pressed {
-                if is_cut_command(self.egui_input.modifiers, logical_key) {
+                if is_cut_command(self.egui_input.modifiers, active_key) {
                     self.egui_input.events.push(egui::Event::Cut);
                     return;
-                } else if is_copy_command(self.egui_input.modifiers, logical_key) {
+                } else if is_copy_command(self.egui_input.modifiers, active_key) {
                     self.egui_input.events.push(egui::Event::Copy);
                     return;
-                } else if is_paste_command(self.egui_input.modifiers, logical_key) {
+                } else if is_paste_command(self.egui_input.modifiers, active_key) {
                     if let Some(contents) = self.clipboard.get() {
                         let contents = contents.replace("\r\n", "\n");
                         if !contents.is_empty() {
@@ -747,7 +764,7 @@ impl State {
             }
 
             self.egui_input.events.push(egui::Event::Key {
-                key: logical_key,
+                key: active_key,
                 physical_key,
                 pressed,
                 repeat: false, // egui will fill this in for us!
@@ -1120,6 +1137,7 @@ fn key_from_key_code(key: winit::keyboard::KeyCode) -> Option<egui::Key> {
         KeyCode::BracketLeft => Key::OpenBracket,
         KeyCode::BracketRight => Key::CloseBracket,
         KeyCode::Backquote => Key::Backtick,
+        KeyCode::Quote => Key::Quote,
 
         KeyCode::Cut => Key::Cut,
         KeyCode::Copy => Key::Copy,
@@ -1254,24 +1272,23 @@ fn translate_cursor(cursor_icon: egui::CursorIcon) -> Option<winit::window::Curs
 
 // Helpers for egui Viewports
 // ---------------------------------------------------------------------------
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub enum ActionRequested {
+    Screenshot,
+    Cut,
+    Copy,
+    Paste,
+}
 
 pub fn process_viewport_commands(
     egui_ctx: &egui::Context,
     info: &mut ViewportInfo,
     commands: impl IntoIterator<Item = ViewportCommand>,
     window: &Window,
-    is_viewport_focused: bool,
-    screenshot_requested: &mut bool,
+    actions_requested: &mut HashSet<ActionRequested>,
 ) {
     for command in commands {
-        process_viewport_command(
-            egui_ctx,
-            window,
-            command,
-            info,
-            is_viewport_focused,
-            screenshot_requested,
-        );
+        process_viewport_command(egui_ctx, window, command, info, actions_requested);
     }
 }
 
@@ -1280,8 +1297,7 @@ fn process_viewport_command(
     window: &Window,
     command: ViewportCommand,
     info: &mut ViewportInfo,
-    is_viewport_focused: bool,
-    screenshot_requested: &mut bool,
+    actions_requested: &mut HashSet<ActionRequested>,
 ) {
     crate::profile_function!();
 
@@ -1299,12 +1315,8 @@ fn process_viewport_command(
             // Need to be handled elsewhere
         }
         ViewportCommand::StartDrag => {
-            // If `is_viewport_focused` is not checked on x11 the input will be permanently taken until the app is killed!
-
-            // TODO(emilk): check that the left mouse-button was pressed down recently,
-            // or we will have bugs on Windows.
-            // See https://github.com/emilk/egui/pull/1108
-            if is_viewport_focused {
+            // If `.has_focus()` is not checked on x11 the input will be permanently taken until the app is killed!
+            if window.has_focus() {
                 if let Err(err) = window.drag_window() {
                     log::warn!("{command:?}: {err}");
                 }
@@ -1478,7 +1490,16 @@ fn process_viewport_command(
             }
         }
         ViewportCommand::Screenshot => {
-            *screenshot_requested = true;
+            actions_requested.insert(ActionRequested::Screenshot);
+        }
+        ViewportCommand::RequestCut => {
+            actions_requested.insert(ActionRequested::Cut);
+        }
+        ViewportCommand::RequestCopy => {
+            actions_requested.insert(ActionRequested::Copy);
+        }
+        ViewportCommand::RequestPaste => {
+            actions_requested.insert(ActionRequested::Paste);
         }
     }
 }
@@ -1486,6 +1507,9 @@ fn process_viewport_command(
 /// Build and intitlaize a window.
 ///
 /// Wrapper around `create_winit_window_builder` and `apply_viewport_builder_to_window`.
+///
+/// # Errors
+/// Possible causes of error include denied permission, incompatible system, and lack of memory.
 pub fn create_window<T>(
     egui_ctx: &egui::Context,
     event_loop: &EventLoopWindowTarget<T>,
@@ -1513,7 +1537,7 @@ pub fn create_winit_window_builder<T>(
     // We set sizes and positions in egui:s own ui points, which depends on the egui
     // zoom_factor and the native pixels per point, so we need to know that here.
     // We don't know what monitor the window will appear on though, but
-    // we'll try to fix that after the window is created in the vall to `apply_viewport_builder_to_window`.
+    // we'll try to fix that after the window is created in the call to `apply_viewport_builder_to_window`.
     let native_pixels_per_point = event_loop
         .primary_monitor()
         .or_else(|| event_loop.available_monitors().next())
@@ -1563,6 +1587,7 @@ pub fn create_winit_window_builder<T>(
         window_type: _window_type,
 
         mouse_passthrough: _, // handled in `apply_viewport_builder_to_window`
+        clamp_size_to_monitor_size: _, // Handled in `viewport_builder` in `epi_integration.rs`
     } = viewport_builder;
 
     let mut window_builder = winit::window::WindowBuilder::new()

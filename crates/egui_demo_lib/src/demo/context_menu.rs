@@ -47,13 +47,13 @@ impl Default for ContextMenus {
     }
 }
 
-impl super::Demo for ContextMenus {
+impl crate::Demo for ContextMenus {
     fn name(&self) -> &'static str {
         "☰ Context Menus"
     }
 
     fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
-        use super::View;
+        use crate::View;
         egui::Window::new(self.name())
             .vscroll(false)
             .resizable(false)
@@ -62,7 +62,7 @@ impl super::Demo for ContextMenus {
     }
 }
 
-impl super::View for ContextMenus {
+impl crate::View for ContextMenus {
     fn ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.menu_button("Click for menu", Self::nested_menus);
@@ -80,8 +80,6 @@ impl super::View for ContextMenus {
         ui.label("Right-click plot to edit it!");
         ui.horizontal(|ui| {
             self.example_plot(ui).context_menu(|ui| {
-                ui.set_min_width(220.0);
-
                 ui.menu_button("Plot", |ui| {
                     if ui.radio_value(&mut self.plot, Plot::Sin, "Sin").clicked()
                         || ui
@@ -97,11 +95,13 @@ impl super::View for ContextMenus {
                 egui::Grid::new("button_grid").show(ui, |ui| {
                     ui.add(
                         egui::DragValue::new(&mut self.width)
+                            .range(0.0..=f32::INFINITY)
                             .speed(1.0)
                             .prefix("Width: "),
                     );
                     ui.add(
                         egui::DragValue::new(&mut self.height)
+                            .range(0.0..=f32::INFINITY)
                             .speed(1.0)
                             .prefix("Height: "),
                     );
@@ -156,24 +156,26 @@ impl ContextMenus {
     }
 
     fn nested_menus(ui: &mut egui::Ui) {
-        if ui.button("Open...").clicked() {
+        ui.set_max_width(200.0); // To make sure we wrap long text
+
+        if ui.button("Open…").clicked() {
             ui.close_menu();
         }
         ui.menu_button("SubMenu", |ui| {
             ui.menu_button("SubMenu", |ui| {
-                if ui.button("Open...").clicked() {
+                if ui.button("Open…").clicked() {
                     ui.close_menu();
                 }
                 let _ = ui.button("Item");
             });
             ui.menu_button("SubMenu", |ui| {
-                if ui.button("Open...").clicked() {
+                if ui.button("Open…").clicked() {
                     ui.close_menu();
                 }
                 let _ = ui.button("Item");
             });
             let _ = ui.button("Item");
-            if ui.button("Open...").clicked() {
+            if ui.button("Open…").clicked() {
                 ui.close_menu();
             }
         });
@@ -182,10 +184,10 @@ impl ContextMenus {
             let _ = ui.button("Item2");
             let _ = ui.button("Item3");
             let _ = ui.button("Item4");
-            if ui.button("Open...").clicked() {
+            if ui.button("Open…").clicked() {
                 ui.close_menu();
             }
         });
-        let _ = ui.button("Very long text for this item");
+        let _ = ui.button("Very long text for this item that should be wrapped");
     }
 }

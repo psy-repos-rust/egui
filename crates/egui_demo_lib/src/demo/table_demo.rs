@@ -1,4 +1,4 @@
-use egui::TextStyle;
+use egui::{TextStyle, TextWrapMode};
 
 #[derive(PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -38,7 +38,7 @@ impl Default for TableDemo {
     }
 }
 
-impl super::Demo for TableDemo {
+impl crate::Demo for TableDemo {
     fn name(&self) -> &'static str {
         "☰ Table"
     }
@@ -48,7 +48,7 @@ impl super::Demo for TableDemo {
             .open(open)
             .default_width(400.0)
             .show(ctx, |ui| {
-                use super::View as _;
+                use crate::View as _;
                 self.ui(ui);
             });
     }
@@ -56,7 +56,7 @@ impl super::Demo for TableDemo {
 
 const NUM_MANUAL_ROWS: usize = 20;
 
-impl super::View for TableDemo {
+impl crate::View for TableDemo {
     fn ui(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
@@ -136,6 +136,7 @@ impl TableDemo {
             .size
             .max(ui.spacing().interact_size.y);
 
+        let available_height = ui.available_height();
         let mut table = TableBuilder::new(ui)
             .striped(self.striped)
             .resizable(self.resizable)
@@ -145,7 +146,8 @@ impl TableDemo {
             .column(Column::initial(100.0).range(40.0..=300.0))
             .column(Column::initial(100.0).at_least(40.0).clip(true))
             .column(Column::remainder())
-            .min_scrolled_height(0.0);
+            .min_scrolled_height(0.0)
+            .max_scroll_height(available_height);
 
         if self.clickable {
             table = table.sense(egui::Sense::click());
@@ -194,7 +196,7 @@ impl TableDemo {
                                 ui.label(long_text(row_index));
                             });
                             row.col(|ui| {
-                                ui.style_mut().wrap = Some(false);
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                                 if is_thick {
                                     ui.heading("Extra thick row");
                                 } else {
@@ -225,7 +227,8 @@ impl TableDemo {
                         });
                         row.col(|ui| {
                             ui.add(
-                                egui::Label::new("Thousands of rows of even height").wrap(false),
+                                egui::Label::new("Thousands of rows of even height")
+                                    .wrap_mode(TextWrapMode::Extend),
                             );
                         });
 
@@ -251,7 +254,7 @@ impl TableDemo {
                             ui.label(long_text(row_index));
                         });
                         row.col(|ui| {
-                            ui.style_mut().wrap = Some(false);
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                             if thick_row(row_index) {
                                 ui.heading("Extra thick row");
                             } else {

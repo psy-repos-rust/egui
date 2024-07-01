@@ -1,16 +1,17 @@
 //! This example shows how to implement custom gestures to pan and zoom in the plot
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+#![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
 use eframe::egui::{self, DragValue, Event, Vec2};
 use egui_plot::{Legend, Line, PlotPoints};
 
-fn main() -> Result<(), eframe::Error> {
+fn main() -> eframe::Result {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
     let options = eframe::NativeOptions::default();
     eframe::run_native(
         "Plot",
         options,
-        Box::new(|_cc| Box::<PlotExample>::default()),
+        Box::new(|_cc| Ok(Box::<PlotExample>::default())),
     )
 }
 
@@ -46,7 +47,7 @@ impl eframe::App for PlotExample {
             ui.horizontal(|ui| {
                 ui.add(
                     DragValue::new(&mut self.zoom_speed)
-                        .clamp_range(0.1..=2.0)
+                        .range(0.1..=2.0)
                         .speed(0.1),
                 );
                 ui.label("Zoom speed").on_hover_text("How fast to zoom in and out with the mouse wheel");
@@ -54,7 +55,7 @@ impl eframe::App for PlotExample {
             ui.horizontal(|ui| {
                 ui.add(
                     DragValue::new(&mut self.scroll_speed)
-                        .clamp_range(0.1..=100.0)
+                        .range(0.1..=100.0)
                         .speed(0.1),
                 );
                 ui.label("Scroll speed").on_hover_text("How fast to pan with the mouse wheel");

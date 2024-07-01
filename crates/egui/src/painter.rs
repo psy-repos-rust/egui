@@ -7,7 +7,7 @@ use crate::{
 };
 use epaint::{
     text::{Fonts, Galley, LayoutJob},
-    CircleShape, ClippedShape, RectShape, Rounding, Shape, Stroke,
+    CircleShape, ClippedShape, PathStroke, RectShape, Rounding, Shape, Stroke,
 };
 
 /// Helper to paint shapes and text to a specific region on a specific layer.
@@ -83,10 +83,33 @@ impl Painter {
         self.fade_to_color = fade_to_color;
     }
 
-    pub(crate) fn set_opacity(&mut self, opacity: f32) {
+    /// Set the opacity (alpha multiplier) of everything painted by this painter from this point forward.
+    ///
+    /// `opacity` must be between 0.0 and 1.0, where 0.0 means fully transparent (i.e., invisible)
+    /// and 1.0 means fully opaque.
+    ///
+    /// See also: [`Self::opacity`] and [`Self::multiply_opacity`].
+    pub fn set_opacity(&mut self, opacity: f32) {
         if opacity.is_finite() {
             self.opacity_factor = opacity.clamp(0.0, 1.0);
         }
+    }
+
+    /// Like [`Self::set_opacity`], but multiplies the given value with the current opacity.
+    ///
+    /// See also: [`Self::set_opacity`] and [`Self::opacity`].
+    pub fn multiply_opacity(&mut self, opacity: f32) {
+        if opacity.is_finite() {
+            self.opacity_factor *= opacity.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Read the current opacity of the underlying painter.
+    ///
+    /// See also: [`Self::set_opacity`] and [`Self::multiply_opacity`].
+    #[inline]
+    pub fn opacity(&self) -> f32 {
+        self.opacity_factor
     }
 
     pub(crate) fn is_visible(&self) -> bool {
@@ -280,7 +303,7 @@ impl Painter {
 /// # Paint different primitives
 impl Painter {
     /// Paints a line from the first point to the second.
-    pub fn line_segment(&self, points: [Pos2; 2], stroke: impl Into<Stroke>) -> ShapeIdx {
+    pub fn line_segment(&self, points: [Pos2; 2], stroke: impl Into<PathStroke>) -> ShapeIdx {
         self.add(Shape::LineSegment {
             points,
             stroke: stroke.into(),
@@ -288,13 +311,13 @@ impl Painter {
     }
 
     /// Paints a horizontal line.
-    pub fn hline(&self, x: impl Into<Rangef>, y: f32, stroke: impl Into<Stroke>) -> ShapeIdx {
-        self.add(Shape::hline(x, y, stroke))
+    pub fn hline(&self, x: impl Into<Rangef>, y: f32, stroke: impl Into<PathStroke>) -> ShapeIdx {
+        self.add(Shape::hline(x, y, stroke.into()))
     }
 
     /// Paints a vertical line.
-    pub fn vline(&self, x: f32, y: impl Into<Rangef>, stroke: impl Into<Stroke>) -> ShapeIdx {
-        self.add(Shape::vline(x, y, stroke))
+    pub fn vline(&self, x: f32, y: impl Into<Rangef>, stroke: impl Into<PathStroke>) -> ShapeIdx {
+        self.add(Shape::vline(x, y, stroke.into()))
     }
 
     pub fn circle(
@@ -513,7 +536,7 @@ impl Painter {
 }
 
 fn tint_shape_towards(shape: &mut Shape, target: Color32) {
-    epaint::shape_transform::adjust_colors(shape, &|color| {
+    epaint::shape_transform::adjust_colors(shape, move |color| {
         if *color != Color32::PLACEHOLDER {
             *color = crate::ecolor::tint_color_towards(*color, target);
         }
@@ -521,7 +544,7 @@ fn tint_shape_towards(shape: &mut Shape, target: Color32) {
 }
 
 fn multiply_opacity(shape: &mut Shape, opacity: f32) {
-    epaint::shape_transform::adjust_colors(shape, &|color| {
+    epaint::shape_transform::adjust_colors(shape, move |color| {
         if *color != Color32::PLACEHOLDER {
             *color = color.gamma_multiply(opacity);
         }

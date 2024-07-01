@@ -1,10 +1,11 @@
 //! Demo app for egui
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+#![allow(rustdoc::missing_crate_level_docs)] // it's an example
 #![allow(clippy::never_loop)] // False positive
 
 // When compiling natively:
-fn main() -> Result<(), eframe::Error> {
+fn main() -> eframe::Result {
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "--profile" => {
@@ -47,7 +48,7 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "egui demo app",
         options,
-        Box::new(|cc| Box::new(egui_demo_app::WrapApp::new(cc))),
+        Box::new(|cc| Ok(Box::new(egui_demo_app::WrapApp::new(cc)))),
     )
 }
 

@@ -1,3 +1,4 @@
+use std::fmt;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use crate::Vec2b;
@@ -130,6 +131,7 @@ impl Vec2 {
 
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
     pub const INFINITY: Self = Self::splat(f32::INFINITY);
+    pub const NAN: Self = Self::splat(f32::NAN);
 
     #[inline(always)]
     pub const fn new(x: f32, y: f32) -> Self {
@@ -464,9 +466,24 @@ impl Div<f32> for Vec2 {
     }
 }
 
-impl std::fmt::Debug for Vec2 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{:.1} {:.1}]", self.x, self.y)
+impl fmt::Debug for Vec2 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(precision) = f.precision() {
+            write!(f, "[{1:.0$} {2:.0$}]", precision, self.x, self.y)
+        } else {
+            write!(f, "[{:.1} {:.1}]", self.x, self.y)
+        }
+    }
+}
+
+impl fmt::Display for Vec2 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[")?;
+        self.x.fmt(f)?;
+        f.write_str(" ")?;
+        self.y.fmt(f)?;
+        f.write_str("]")?;
+        Ok(())
     }
 }
 

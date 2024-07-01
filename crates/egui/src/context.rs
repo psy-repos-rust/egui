@@ -2,6 +2,7 @@
 
 use std::{borrow::Cow, cell::RefCell, panic::Location, sync::Arc, time::Duration};
 
+use containers::area::AreaState;
 use epaint::{
     emath::TSTransform, mutex::*, stats::*, text::Fonts, util::OrderedFloat, TessellationOptions, *,
 };
@@ -197,36 +198,39 @@ impl ContextImpl {
 
 // ----------------------------------------------------------------------------
 
-/// State stored per viewport
+/// State stored per viewport.
+///
+/// Mostly for internal use.
+/// Things here may move and change without warning.
 #[derive(Default)]
-struct ViewportState {
+pub struct ViewportState {
     /// The type of viewport.
     ///
     /// This will never be [`ViewportClass::Embedded`],
     /// since those don't result in real viewports.
-    class: ViewportClass,
+    pub class: ViewportClass,
 
     /// The latest delta
-    builder: ViewportBuilder,
+    pub builder: ViewportBuilder,
 
     /// The user-code that shows the GUI, used for deferred viewports.
     ///
     /// `None` for immediate viewports.
-    viewport_ui_cb: Option<Arc<DeferredViewportUiCallback>>,
+    pub viewport_ui_cb: Option<Arc<DeferredViewportUiCallback>>,
 
-    input: InputState,
+    pub input: InputState,
 
     /// State that is collected during a frame and then cleared
-    frame_state: FrameState,
+    pub frame_state: FrameState,
 
     /// Has this viewport been updated this frame?
-    used: bool,
+    pub used: bool,
 
     /// Written to during the frame.
-    widgets_this_frame: WidgetRects,
+    pub widgets_this_frame: WidgetRects,
 
     /// Read
-    widgets_prev_frame: WidgetRects,
+    pub widgets_prev_frame: WidgetRects,
 
     /// State related to repaint scheduling.
     repaint: ViewportRepaintInfo,
@@ -235,20 +239,20 @@ struct ViewportState {
     // Updated at the start of the frame:
     //
     /// Which widgets are under the pointer?
-    hits: WidgetHits,
+    pub hits: WidgetHits,
 
     /// What widgets are being interacted with this frame?
     ///
     /// Based on the widgets from last frame, and input in this frame.
-    interact_widgets: InteractionSnapshot,
+    pub interact_widgets: InteractionSnapshot,
 
     // ----------------------
     // The output of a frame:
     //
-    graphics: GraphicLayers,
+    pub graphics: GraphicLayers,
     // Most of the things in `PlatformOutput` are not actually viewport dependent.
-    output: PlatformOutput,
-    commands: Vec<ViewportCommand>,
+    pub output: PlatformOutput,
+    pub commands: Vec<ViewportCommand>,
 }
 
 /// What called [`Context::request_repaint`]?
@@ -257,7 +261,7 @@ pub struct RepaintCause {
     /// What file had the call that requested the repaint?
     pub file: &'static str,
 
-    /// What line number of the the call that requested the repaint?
+    /// What line number of the call that requested the repaint?
     pub line: u32,
 }
 
@@ -442,6 +446,7 @@ impl ContextImpl {
             new_raw_input,
             viewport.repaint.requested_immediate_repaint_prev_frame(),
             pixels_per_point,
+            &self.memory.options,
         );
 
         let screen_rect = viewport.input.screen_rect;
@@ -489,11 +494,12 @@ impl ContextImpl {
         // Ensure we register the background area so panels and background ui can catch clicks:
         self.memory.areas_mut().set_state(
             LayerId::background(),
-            containers::area::State {
-                pivot_pos: screen_rect.left_top(),
+            AreaState {
+                pivot_pos: Some(screen_rect.left_top()),
                 pivot: Align2::LEFT_TOP,
-                size: screen_rect.size(),
+                size: Some(screen_rect.size()),
                 interactable: true,
+                last_became_visible_at: None,
             },
         );
 
@@ -924,7 +930,7 @@ impl Context {
         self.write(move |ctx| writer(&mut ctx.memory.options.tessellation_options))
     }
 
-    /// If the given [`Id`] has been used previously the same frame at at different position,
+    /// If the given [`Id`] has been used previously the same frame at different position,
     /// then an error will be printed on screen.
     ///
     /// This function is already called for all widgets that do any interaction,
@@ -1748,7 +1754,7 @@ impl Context {
         let name = name.into();
         let image = image.into();
         let max_texture_side = self.input(|i| i.max_texture_side);
-        crate::egui_assert!(
+        debug_assert!(
             image.width() <= max_texture_side && image.height() <= max_texture_side,
             "Texture {:?} has size {}x{}, but the maximum texture side is {}",
             name,
@@ -1773,23 +1779,7 @@ impl Context {
     // ---------------------------------------------------------------------
 
     /// Constrain the position of a window/area so it fits within the provided boundary.
-    ///
-    /// If area is `None`, will constrain to [`Self::available_rect`].
-    pub(crate) fn constrain_window_rect_to_area(&self, window: Rect, area: Option<Rect>) -> Rect {
-        let mut area = area.unwrap_or_else(|| self.available_rect());
-
-        if window.width() > area.width() {
-            // Allow overlapping side bars.
-            // This is important for small screens, e.g. mobiles running the web demo.
-            let screen_rect = self.screen_rect();
-            (area.min.x, area.max.x) = (screen_rect.min.x, screen_rect.max.x);
-        }
-        if window.height() > area.height() {
-            // Allow overlapping top/bottom bars:
-            let screen_rect = self.screen_rect();
-            (area.min.y, area.max.y) = (screen_rect.min.y, screen_rect.max.y);
-        }
-
+    pub(crate) fn constrain_window_rect_to_area(&self, window: Rect, area: Rect) -> Rect {
         let mut pos = window.min;
 
         // Constrain to screen, unless window is too large to fit:
@@ -1838,7 +1828,7 @@ impl Context {
 
         let paint_widget_id = |id: Id, text: &str, color: Color32| {
             if let Some(widget) =
-                self.write(|ctx| ctx.viewport().widgets_this_frame.get(id).cloned())
+                self.write(|ctx| ctx.viewport().widgets_this_frame.get(id).copied())
             {
                 paint_widget(&widget, text, color);
             }
@@ -2036,8 +2026,10 @@ impl ContextImpl {
             viewport.widgets_this_frame.clear();
         }
 
-        if repaint_needed || viewport.input.wants_repaint() {
+        if repaint_needed {
             self.request_repaint(ended_viewport_id, RepaintCause::new());
+        } else if let Some(delay) = viewport.input.wants_repaint_after() {
+            self.request_repaint_after(delay, ended_viewport_id, RepaintCause::new());
         }
 
         //  -------------------
@@ -2217,7 +2209,7 @@ impl Context {
     pub fn used_rect(&self) -> Rect {
         self.write(|ctx| {
             let mut used = ctx.viewport().frame_state.used_by_panels;
-            for window in ctx.memory.areas().visible_windows() {
+            for (_id, window) in ctx.memory.areas().visible_windows() {
                 used = used.union(window.rect());
             }
             used
@@ -2384,6 +2376,17 @@ impl Context {
         self.memory_mut(|mem| mem.areas_mut().move_to_top(layer_id));
     }
 
+    /// Mark the `child` layer as a sublayer of `parent`.
+    ///
+    /// Sublayers are moved directly above the parent layer at the end of the frame. This is mainly
+    /// intended for adding a new [`Area`] inside a [`Window`].
+    ///
+    /// This currently only supports one level of nesting. If `parent` is a sublayer of another
+    /// layer, the behavior is unspecified.
+    pub fn set_sublayer(&self, parent: LayerId, child: LayerId) {
+        self.memory_mut(|mem| mem.areas_mut().set_sublayer(parent, child));
+    }
+
     /// Retrieve the [`LayerId`] of the top level windows.
     pub fn top_layer_id(&self) -> Option<LayerId> {
         self.memory(|mem| mem.areas().top_layer_id(Order::Middle))
@@ -2398,7 +2401,7 @@ impl Context {
     /// See also [`Response::contains_pointer`].
     pub fn rect_contains_pointer(&self, layer_id: LayerId, rect: Rect) -> bool {
         let rect =
-            if let Some(transform) = self.memory(|m| m.layer_transforms.get(&layer_id).cloned()) {
+            if let Some(transform) = self.memory(|m| m.layer_transforms.get(&layer_id).copied()) {
                 transform * rect
             } else {
                 rect
@@ -2452,12 +2455,51 @@ impl Context {
     #[track_caller] // To track repaint cause
     pub fn animate_bool(&self, id: Id, value: bool) -> f32 {
         let animation_time = self.style().animation_time;
-        self.animate_bool_with_time(id, value, animation_time)
+        self.animate_bool_with_time_and_easing(id, value, animation_time, emath::easing::linear)
+    }
+
+    /// Like [`Self::animate_bool`], but uses an easing function that makes the value move
+    /// quickly in the beginning and slow down towards the end.
+    ///
+    /// The exact easing function may come to change in future versions of egui.
+    #[track_caller] // To track repaint cause
+    pub fn animate_bool_responsive(&self, id: Id, value: bool) -> f32 {
+        self.animate_bool_with_easing(id, value, emath::easing::cubic_out)
+    }
+
+    /// Like [`Self::animate_bool`] but allows you to control the easing function.
+    #[track_caller] // To track repaint cause
+    pub fn animate_bool_with_easing(&self, id: Id, value: bool, easing: fn(f32) -> f32) -> f32 {
+        let animation_time = self.style().animation_time;
+        self.animate_bool_with_time_and_easing(id, value, animation_time, easing)
     }
 
     /// Like [`Self::animate_bool`] but allows you to control the animation time.
     #[track_caller] // To track repaint cause
     pub fn animate_bool_with_time(&self, id: Id, target_value: bool, animation_time: f32) -> f32 {
+        self.animate_bool_with_time_and_easing(
+            id,
+            target_value,
+            animation_time,
+            emath::easing::linear,
+        )
+    }
+
+    /// Like [`Self::animate_bool`] but allows you to control the animation time and easing function.
+    ///
+    /// Use e.g. [`emath::easing::quadratic_out`]
+    /// for a responsive start and a slow end.
+    ///
+    /// The easing function flips when `target_value` is `false`,
+    /// so that when going back towards 0.0, we get
+    #[track_caller] // To track repaint cause
+    pub fn animate_bool_with_time_and_easing(
+        &self,
+        id: Id,
+        target_value: bool,
+        animation_time: f32,
+        easing: fn(f32) -> f32,
+    ) -> f32 {
         let animated_value = self.write(|ctx| {
             ctx.animation_manager.animate_bool(
                 &ctx.viewports.entry(ctx.viewport_id()).or_default().input,
@@ -2466,11 +2508,17 @@ impl Context {
                 target_value,
             )
         });
+
         let animation_in_progress = 0.0 < animated_value && animated_value < 1.0;
         if animation_in_progress {
             self.request_repaint();
         }
-        animated_value
+
+        if target_value {
+            easing(animated_value)
+        } else {
+            1.0 - easing(1.0 - animated_value)
+        }
     }
 
     /// Smoothly animate an `f32` value.
@@ -2701,7 +2749,7 @@ impl Context {
             ui.label("Hover to highlight");
             let layers_ids: Vec<LayerId> = self.memory(|mem| mem.areas().order().to_vec());
             for layer_id in layers_ids {
-                let area = self.memory(|mem| mem.areas().get(layer_id.id).copied());
+                let area = AreaState::load(self, layer_id.id);
                 if let Some(area) = area {
                     let is_visible = self.memory(|mem| mem.areas().is_visible(&layer_id));
                     if !is_visible {
@@ -3103,6 +3151,20 @@ impl Context {
     /// Don't use this outside of `Self::run`, or after `Self::end_frame`.
     pub fn parent_viewport_id(&self) -> ViewportId {
         self.read(|ctx| ctx.parent_viewport_id())
+    }
+
+    /// Read the state of the current viewport.
+    pub fn viewport<R>(&self, reader: impl FnOnce(&ViewportState) -> R) -> R {
+        self.write(|ctx| reader(ctx.viewport()))
+    }
+
+    /// Read the state of a specific current viewport.
+    pub fn viewport_for<R>(
+        &self,
+        viewport_id: ViewportId,
+        reader: impl FnOnce(&ViewportState) -> R,
+    ) -> R {
+        self.write(|ctx| reader(ctx.viewport_for(viewport_id)))
     }
 
     /// For integrations: Set this to render a sync viewport.

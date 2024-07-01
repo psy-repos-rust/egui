@@ -1,8 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+#![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
 use eframe::egui;
 
-fn main() -> Result<(), eframe::Error> {
+fn main() -> eframe::Result {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
 
     if cfg!(target_os = "macos") {
@@ -22,7 +23,7 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "First Window",
         options.clone(),
-        Box::new(|_cc| Box::new(MyApp { has_next: true })),
+        Box::new(|_cc| Ok(Box::new(MyApp { has_next: true }))),
     )?;
 
     std::thread::sleep(std::time::Duration::from_secs(2));
@@ -31,7 +32,7 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "Second Window",
         options.clone(),
-        Box::new(|_cc| Box::new(MyApp { has_next: true })),
+        Box::new(|_cc| Ok(Box::new(MyApp { has_next: true }))),
     )?;
 
     std::thread::sleep(std::time::Duration::from_secs(2));
@@ -40,7 +41,7 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "Third Window",
         options,
-        Box::new(|_cc| Box::new(MyApp { has_next: false })),
+        Box::new(|_cc| Ok(Box::new(MyApp { has_next: false }))),
     )
 }
 

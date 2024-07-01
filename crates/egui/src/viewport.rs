@@ -275,6 +275,11 @@ pub struct ViewportBuilder {
     pub min_inner_size: Option<Vec2>,
     pub max_inner_size: Option<Vec2>,
 
+    /// Whether clamp the window's size to monitor's size. The default is `true` on linux, otherwise it is `false`.
+    ///
+    /// Note: On some Linux systems, a window size larger than the monitor causes crashes
+    pub clamp_size_to_monitor_size: Option<bool>,
+
     pub fullscreen: Option<bool>,
     pub maximized: Option<bool>,
     pub resizable: Option<bool>,
@@ -384,7 +389,7 @@ impl ViewportBuilder {
     /// The application icon, e.g. in the Windows task bar or the alt-tab menu.
     ///
     /// The default icon is a white `e` on a black background (for "egui" or "eframe").
-    /// If you prefer the OS default, set this to `None`.
+    /// If you prefer the OS default, set this to `IconData::default()`.
     #[inline]
     pub fn with_icon(mut self, icon: impl Into<Arc<IconData>>) -> Self {
         self.icon = Some(icon.into());
@@ -490,6 +495,15 @@ impl ViewportBuilder {
     #[inline]
     pub fn with_max_inner_size(mut self, size: impl Into<Vec2>) -> Self {
         self.max_inner_size = Some(size.into());
+        self
+    }
+
+    /// Sets whether clamp the window's size to monitor's size. The default is `true` on linux, otherwise it is `false`.
+    ///
+    /// Note: On some Linux systems, a window size larger than the monitor causes crashes
+    #[inline]
+    pub fn with_clamp_size_to_monitor_size(mut self, value: bool) -> Self {
+        self.clamp_size_to_monitor_size = Some(value);
         self
     }
 
@@ -606,6 +620,7 @@ impl ViewportBuilder {
             inner_size: new_inner_size,
             min_inner_size: new_min_inner_size,
             max_inner_size: new_max_inner_size,
+            clamp_size_to_monitor_size: new_clamp_size_to_monitor_size,
             fullscreen: new_fullscreen,
             maximized: new_maximized,
             resizable: new_resizable,
@@ -740,6 +755,13 @@ impl ViewportBuilder {
 
         let mut recreate_window = false;
 
+        if new_clamp_size_to_monitor_size.is_some()
+            && self.clamp_size_to_monitor_size != new_clamp_size_to_monitor_size
+        {
+            self.clamp_size_to_monitor_size = new_clamp_size_to_monitor_size;
+            recreate_window = true;
+        }
+
         if new_active.is_some() && self.active != new_active {
             self.active = new_active;
             recreate_window = true;
@@ -867,7 +889,7 @@ pub enum X11WindowType {
     /// This property is typically used on override-redirect windows.
     Combo,
 
-    /// This indicates the the window is being dragged.
+    /// This indicates the window is being dragged.
     /// This property is typically used on override-redirect windows.
     Dnd,
 }
@@ -993,7 +1015,7 @@ pub enum ViewportCommand {
     /// Set window to be always-on-top, always-on-bottom, or neither.
     WindowLevel(WindowLevel),
 
-    /// The the window icon.
+    /// The window icon.
     Icon(Option<Arc<IconData>>),
 
     /// Set the IME cursor editing area.
@@ -1038,6 +1060,21 @@ pub enum ViewportCommand {
     ///
     /// The results are returned in `crate::Event::Screenshot`.
     Screenshot,
+
+    /// Request cut of the current selection
+    ///
+    /// This is equivalent to the system keyboard shortcut for cut (e.g. CTRL + X).
+    RequestCut,
+
+    /// Request a copy of the current selection.
+    ///
+    /// This is equivalent to the system keyboard shortcut for copy (e.g. CTRL + C).
+    RequestCopy,
+
+    /// Request a paste from the clipboard to the current focused `TextEdit` if any.
+    ///
+    /// This is equivalent to the system keyboard shortcut for paste (e.g. CTRL + V).
+    RequestPaste,
 }
 
 impl ViewportCommand {

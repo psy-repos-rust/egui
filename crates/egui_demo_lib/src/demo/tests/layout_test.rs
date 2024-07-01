@@ -73,7 +73,7 @@ impl LayoutSettings {
     }
 }
 
-impl super::Demo for LayoutTest {
+impl crate::Demo for LayoutTest {
     fn name(&self) -> &'static str {
         "Layout Test"
     }
@@ -83,13 +83,13 @@ impl super::Demo for LayoutTest {
             .open(open)
             .resizable(false)
             .show(ctx, |ui| {
-                use super::View as _;
+                use crate::View as _;
                 self.ui(ui);
             });
     }
 }
 
-impl super::View for LayoutTest {
+impl crate::View for LayoutTest {
     fn ui(&mut self, ui: &mut Ui) {
         ui.label("Tests and demonstrates the limits of the egui layouts");
         self.content_ui(ui);
@@ -176,7 +176,7 @@ impl LayoutTest {
 }
 
 fn demo_ui(ui: &mut Ui) {
-    ui.add(egui::Label::new("Wrapping text followed by example widgets:").wrap(true));
+    ui.add(egui::Label::new("Wrapping text followed by example widgets:").wrap());
     let mut dummy = false;
     ui.checkbox(&mut dummy, "checkbox");
     ui.radio_value(&mut dummy, false, "radio");

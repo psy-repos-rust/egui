@@ -48,9 +48,8 @@ pub enum SliderOrientation {
 /// Control a number with a slider.
 ///
 /// The slider range defines the values you get when pulling the slider to the far edges.
-/// By default, the slider can still show values outside this range,
-/// and still allows users to enter values outside the range by clicking the slider value and editing it.
-/// If you want to clamp incoming and outgoing values, use [`Slider::clamp_to_range`].
+/// By default all values are clamped to this range, even when not interacted with.
+/// You can change this behavior by passing `false` to [`Slider::clamp_to_range`].
 ///
 /// The range can include any numbers, and go from low-to-high or from high-to-low.
 ///
@@ -319,7 +318,9 @@ impl<'a> Slider<'a> {
     /// A custom formatter takes a `f64` for the numeric value and a `RangeInclusive<usize>` representing
     /// the decimal range i.e. minimum and maximum number of decimal places shown.
     ///
-    /// See also: [`DragValue::custom_parser`]
+    /// The default formatter is [`Style::number_formatter`].
+    ///
+    /// See also: [`Slider::custom_parser`]
     ///
     /// ```
     /// # egui::__run_test_ui(|ui| {
@@ -362,7 +363,7 @@ impl<'a> Slider<'a> {
     /// A custom parser takes an `&str` to parse into a number and returns `Some` if it was successfully parsed
     /// or `None` otherwise.
     ///
-    /// See also: [`DragValue::custom_formatter`]
+    /// See also: [`Slider::custom_formatter`]
     ///
     /// ```
     /// # egui::__run_test_ui(|ui| {
@@ -545,14 +546,6 @@ impl<'a> Slider<'a> {
         set(&mut self.get_set_value, value);
     }
 
-    fn clamp_range(&self) -> RangeInclusive<f64> {
-        if self.clamp_to_range {
-            self.range()
-        } else {
-            f64::NEG_INFINITY..=f64::INFINITY
-        }
-    }
-
     fn range(&self) -> RangeInclusive<f64> {
         self.range.clone()
     }
@@ -686,12 +679,10 @@ impl<'a> Slider<'a> {
 
             let rail_radius = (spacing.slider_rail_height / 2.0).at_least(0.0);
             let rail_rect = self.rail_rect(rect, rail_radius);
+            let rounding = widget_visuals.inactive.rounding;
 
-            ui.painter().rect_filled(
-                rail_rect,
-                widget_visuals.inactive.rounding,
-                widget_visuals.inactive.bg_fill,
-            );
+            ui.painter()
+                .rect_filled(rail_rect, rounding, widget_visuals.inactive.bg_fill);
 
             let position_1d = self.position_from_value(value, position_range);
             let center = self.marker_center(position_1d, &rail_rect);
@@ -707,13 +698,17 @@ impl<'a> Slider<'a> {
 
                 // The trailing rect has to be drawn differently depending on the orientation.
                 match self.orientation {
-                    SliderOrientation::Vertical => trailing_rail_rect.min.y = center.y,
-                    SliderOrientation::Horizontal => trailing_rail_rect.max.x = center.x,
+                    SliderOrientation::Horizontal => {
+                        trailing_rail_rect.max.x = center.x + rounding.nw;
+                    }
+                    SliderOrientation::Vertical => {
+                        trailing_rail_rect.min.y = center.y - rounding.se;
+                    }
                 };
 
                 ui.painter().rect_filled(
                     trailing_rail_rect,
-                    widget_visuals.inactive.rounding,
+                    rounding,
                     ui.visuals().selection.bg_fill,
                 );
             }
@@ -816,7 +811,8 @@ impl<'a> Slider<'a> {
         let response = ui.add({
             let mut dv = DragValue::new(&mut value)
                 .speed(speed)
-                .clamp_range(self.clamp_range())
+                .range(self.range.clone())
+                .clamp_to_range(self.clamp_to_range)
                 .min_decimals(self.min_decimals)
                 .max_decimals_opt(self.max_decimals)
                 .suffix(self.suffix.clone())
@@ -868,7 +864,12 @@ impl<'a> Slider<'a> {
                 builder.set_numeric_value_step(step);
             }
             builder.add_action(Action::SetValue);
-            let clamp_range = self.clamp_range();
+
+            let clamp_range = if self.clamp_to_range {
+                self.range()
+            } else {
+                f64::NEG_INFINITY..=f64::INFINITY
+            };
             if value < *clamp_range.end() {
                 builder.add_action(Action::Increment);
             }
@@ -902,7 +903,8 @@ impl<'a> Slider<'a> {
         };
 
         if !self.text.is_empty() {
-            let label_response = ui.add(Label::new(self.text.clone()).wrap(false));
+            let label_response =
+                ui.add(Label::new(self.text.clone()).wrap_mode(TextWrapMode::Extend));
             // The slider already has an accessibility label via widget info,
             // but sometimes it's useful for a screen reader to know
             // that a piece of text is a label for another widget,
@@ -981,7 +983,7 @@ fn value_from_normalized(normalized: f64, range: RangeInclusive<f64>, spec: &Sli
             }
         }
     } else {
-        crate::egui_assert!(
+        debug_assert!(
             min.is_finite() && max.is_finite(),
             "You should use a logarithmic range"
         );
@@ -1030,7 +1032,7 @@ fn normalized_from_value(value: f64, range: RangeInclusive<f64>, spec: &SliderSp
             }
         }
     } else {
-        crate::egui_assert!(
+        debug_assert!(
             min.is_finite() && max.is_finite(),
             "You should use a logarithmic range"
         );
@@ -1078,6 +1080,6 @@ fn logarithmic_zero_cutoff(min: f64, max: f64) -> f64 {
     };
 
     let cutoff = min_magnitude / (min_magnitude + max_magnitude);
-    crate::egui_assert!(0.0 <= cutoff && cutoff <= 1.0);
+    debug_assert!(0.0 <= cutoff && cutoff <= 1.0);
     cutoff
 }

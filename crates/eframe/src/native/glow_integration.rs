@@ -5,10 +5,15 @@
 //! There is a bunch of improvements we could do,
 //! like removing a bunch of `unwraps`.
 
-#![allow(clippy::arc_with_non_send_sync)] // glow::Context was accidentally non-Sync in glow 0.13, but that will be fixed in future releases of glow: https://github.com/grovesNL/glow/commit/c4a5f7151b9b4bbb380faa06ec27415235d1bf7e
+// `clippy::arc_with_non_send_sync`: `glow::Context` was accidentally non-Sync in glow 0.13,
+// but that will be fixed in future releases of glow.
+// https://github.com/grovesNL/glow/commit/c4a5f7151b9b4bbb380faa06ec27415235d1bf7e
+#![allow(clippy::arc_with_non_send_sync)]
+#![allow(clippy::undocumented_unsafe_blocks)]
 
 use std::{cell::RefCell, num::NonZeroU32, rc::Rc, sync::Arc, time::Instant};
 
+use egui_winit::ActionRequested;
 use glutin::{
     config::GlConfig,
     context::NotCurrentGlContext,
@@ -21,9 +26,10 @@ use winit::{
     window::{Window, WindowId},
 };
 
+use ahash::{HashMap, HashSet};
 use egui::{
-    epaint::ahash::HashMap, DeferredViewportUiCallback, ImmediateViewport, ViewportBuilder,
-    ViewportClass, ViewportId, ViewportIdMap, ViewportIdPair, ViewportInfo, ViewportOutput,
+    DeferredViewportUiCallback, ImmediateViewport, ViewportBuilder, ViewportClass, ViewportId,
+    ViewportIdMap, ViewportIdPair, ViewportInfo, ViewportOutput,
 };
 #[cfg(feature = "accesskit")]
 use egui_winit::accesskit_winit;
@@ -104,7 +110,7 @@ struct Viewport {
     builder: ViewportBuilder,
     deferred_commands: Vec<egui::viewport::ViewportCommand>,
     info: ViewportInfo,
-    screenshot_requested: bool,
+    actions_requested: HashSet<egui_winit::ActionRequested>,
 
     /// The user-callback that shows the ui.
     /// None for immediate viewports.
@@ -189,13 +195,17 @@ impl GlowWinitApp {
     ) -> Result<&mut GlowWinitRunning> {
         crate::profile_function!();
 
-        let storage = epi_integration::create_storage(
-            self.native_options
-                .viewport
-                .app_id
-                .as_ref()
-                .unwrap_or(&self.app_name),
-        );
+        let storage = if let Some(file) = &self.native_options.persistence_path {
+            epi_integration::create_storage_with_file(file)
+        } else {
+            epi_integration::create_storage(
+                self.native_options
+                    .viewport
+                    .app_id
+                    .as_ref()
+                    .unwrap_or(&self.app_name),
+            )
+        };
 
         let egui_ctx = create_egui_context(storage.as_deref());
 
@@ -303,7 +313,7 @@ impl GlowWinitApp {
                 raw_window_handle: window.window_handle().map(|h| h.as_raw()),
             };
             crate::profile_scope!("app_creator");
-            app_creator(&cc)
+            app_creator(&cc).map_err(crate::Error::AppCreation)?
         };
 
         let glutin = Rc::new(RefCell::new(glutin));
@@ -352,21 +362,6 @@ impl WinitApp for GlowWinitApp {
         self.running
             .as_ref()
             .map_or(0, |r| r.integration.egui_ctx.frame_nr_for(viewport_id))
-    }
-
-    fn is_focused(&self, window_id: WindowId) -> bool {
-        if let Some(running) = &self.running {
-            let glutin = running.glutin.borrow();
-            if let Some(window_id) = glutin.viewport_from_window.get(&window_id) {
-                return glutin.focused_viewport == Some(*window_id);
-            }
-        }
-
-        false
-    }
-
-    fn integration(&self) -> Option<&EpiIntegration> {
-        self.running.as_ref().map(|r| &r.integration)
     }
 
     fn window(&self, window_id: WindowId) -> Option<Arc<Window>> {
@@ -682,17 +677,38 @@ impl GlowWinitRunning {
         );
 
         {
-            let screenshot_requested = std::mem::take(&mut viewport.screenshot_requested);
-            if screenshot_requested {
-                let screenshot = painter.read_screen_rgba(screen_size_in_pixels);
-                egui_winit
-                    .egui_input_mut()
-                    .events
-                    .push(egui::Event::Screenshot {
-                        viewport_id,
-                        image: screenshot.into(),
-                    });
+            for action in viewport.actions_requested.drain() {
+                match action {
+                    ActionRequested::Screenshot => {
+                        let screenshot = painter.read_screen_rgba(screen_size_in_pixels);
+                        egui_winit
+                            .egui_input_mut()
+                            .events
+                            .push(egui::Event::Screenshot {
+                                viewport_id,
+                                image: screenshot.into(),
+                            });
+                    }
+                    ActionRequested::Cut => {
+                        egui_winit.egui_input_mut().events.push(egui::Event::Cut);
+                    }
+                    ActionRequested::Copy => {
+                        egui_winit.egui_input_mut().events.push(egui::Event::Copy);
+                    }
+                    ActionRequested::Paste => {
+                        if let Some(contents) = egui_winit.clipboard_text() {
+                            let contents = contents.replace("\r\n", "\n");
+                            if !contents.is_empty() {
+                                egui_winit
+                                    .egui_input_mut()
+                                    .events
+                                    .push(egui::Event::Paste(contents));
+                            }
+                        }
+                    }
+                }
             }
+
             integration.post_rendering(&window);
         }
 
@@ -1020,7 +1036,7 @@ impl GlutinWindowContext {
                 builder: viewport_builder,
                 deferred_commands: vec![],
                 info,
-                screenshot_requested: false,
+                actions_requested: Default::default(),
                 viewport_ui_cb: None,
                 gl_surface: None,
                 window: window.map(Arc::new),
@@ -1072,7 +1088,7 @@ impl GlutinWindowContext {
         &mut self,
         viewport_id: ViewportId,
         event_loop: &EventLoopWindowTarget<UserEvent>,
-    ) -> Result<()> {
+    ) -> Result {
         crate::profile_function!();
 
         let viewport = self
@@ -1172,7 +1188,7 @@ impl GlutinWindowContext {
     }
 
     /// only applies for android. but we basically drop surface + window and make context not current
-    fn on_suspend(&mut self) -> Result<()> {
+    fn on_suspend(&mut self) -> Result {
         log::debug!("received suspend event. dropping window and surface");
         for viewport in self.viewports.values_mut() {
             viewport.gl_surface = None;
@@ -1268,7 +1284,6 @@ impl GlutinWindowContext {
             if let Some(window) = &viewport.window {
                 let old_inner_size = window.inner_size();
 
-                let is_viewport_focused = self.focused_viewport == Some(viewport_id);
                 viewport.deferred_commands.append(&mut commands);
 
                 egui_winit::process_viewport_commands(
@@ -1276,8 +1291,7 @@ impl GlutinWindowContext {
                     &mut viewport.info,
                     std::mem::take(&mut viewport.deferred_commands),
                     window,
-                    is_viewport_focused,
-                    &mut viewport.screenshot_requested,
+                    &mut viewport.actions_requested,
                 );
 
                 // For Wayland : https://github.com/emilk/egui/issues/4196
@@ -1323,7 +1337,7 @@ fn initialize_or_update_viewport(
                 builder,
                 deferred_commands: vec![],
                 info: Default::default(),
-                screenshot_requested: false,
+                actions_requested: Default::default(),
                 viewport_ui_cb,
                 window: None,
                 egui_winit: None,

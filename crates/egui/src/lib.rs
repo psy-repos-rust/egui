@@ -3,7 +3,7 @@
 //! Try the live web demo: <https://www.egui.rs/#demo>. Read more about egui at <https://github.com/emilk/egui>.
 //!
 //! `egui` is in heavy development, with each new version having breaking changes.
-//! You need to have rust 1.62.0 or later to use `egui`.
+//! You need to have rust 1.76.0 or later to use `egui`.
 //!
 //! To quickly get started with egui, you can take a look at [`eframe_template`](https://github.com/emilk/eframe_template)
 //! which uses [`eframe`](https://docs.rs/eframe).
@@ -338,6 +338,7 @@
 //! ## Code snippets
 //!
 //! ```
+//! # use egui::TextWrapMode;
 //! # egui::__run_test_ui(|ui| {
 //! # let mut some_bool = true;
 //! // Miscellaneous tips and tricks
@@ -358,7 +359,7 @@
 //! ui.scope(|ui| {
 //!     ui.visuals_mut().override_text_color = Some(egui::Color32::RED);
 //!     ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-//!     ui.style_mut().wrap = Some(false);
+//!     ui.style_mut().wrap_mode = Some(TextWrapMode::Truncate);
 //!
 //!     ui.label("This text will be red, monospace, and won't wrap to a new line");
 //! }); // the temporary settings are reverted here
@@ -371,8 +372,6 @@
 
 #![allow(clippy::float_cmp)]
 #![allow(clippy::manual_range_contains)]
-#![cfg_attr(feature = "puffin", deny(unsafe_code))]
-#![cfg_attr(not(feature = "puffin"), forbid(unsafe_code))]
 
 mod animation_manager;
 pub mod containers;
@@ -401,6 +400,7 @@ mod sense;
 pub mod style;
 pub mod text_selection;
 mod ui;
+mod ui_stack;
 pub mod util;
 pub mod viewport;
 mod widget_rect;
@@ -453,6 +453,7 @@ pub use {
         Key,
     },
     drag_and_drop::DragAndDrop,
+    epaint::text::TextWrapMode,
     grid::Grid,
     id::{Id, IdMap},
     input_state::{InputState, MultiTouchInfo, PointerState},
@@ -466,6 +467,7 @@ pub use {
     style::{FontSelection, Style, TextStyle, Visuals},
     text::{Galley, TextFormat},
     ui::Ui,
+    ui_stack::*,
     viewport::*,
     widget_rect::{WidgetRect, WidgetRects},
     widget_text::{RichText, WidgetText},
@@ -509,7 +511,7 @@ pub fn warn_if_debug_build(ui: &mut crate::Ui) {
 /// ```
 #[macro_export]
 macro_rules! include_image {
-    ($path: literal) => {
+    ($path:expr $(,)?) => {
         $crate::ImageSource::Bytes {
             uri: ::std::borrow::Cow::Borrowed(concat!("bytes://", $path)),
             bytes: $crate::load::Bytes::Static(include_bytes!($path)),
@@ -517,7 +519,7 @@ macro_rules! include_image {
     };
 }
 
-/// Create a [`Hyperlink`](crate::Hyperlink) to the current [`file!()`] (and line) on Github
+/// Create a [`Hyperlink`] to the current [`file!()`] (and line) on Github
 ///
 /// ```
 /// # egui::__run_test_ui(|ui| {
@@ -532,7 +534,7 @@ macro_rules! github_link_file_line {
     }};
 }
 
-/// Create a [`Hyperlink`](crate::Hyperlink) to the current [`file!()`] on github.
+/// Create a [`Hyperlink`] to the current [`file!()`] on github.
 ///
 /// ```
 /// # egui::__run_test_ui(|ui| {
@@ -545,22 +547,6 @@ macro_rules! github_link_file {
         let url = format!("{}{}", $github_url, file!());
         $crate::Hyperlink::from_label_and_url($label, url)
     }};
-}
-
-// ----------------------------------------------------------------------------
-
-/// An assert that is only active when `egui` is compiled with the `extra_asserts` feature
-/// or with the `extra_debug_asserts` feature in debug builds.
-#[macro_export]
-macro_rules! egui_assert {
-    ($($arg: tt)*) => {
-        if cfg!(any(
-            feature = "extra_asserts",
-            all(feature = "extra_debug_asserts", debug_assertions),
-        )) {
-            assert!($($arg)*);
-        }
-    }
 }
 
 // ----------------------------------------------------------------------------

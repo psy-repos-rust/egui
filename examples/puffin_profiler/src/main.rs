@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+#![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -7,7 +8,7 @@ use std::sync::{
 
 use eframe::egui;
 
-fn main() -> Result<(), eframe::Error> {
+fn main() -> eframe::Result {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
     start_puffin_server(); // NOTE: you may only want to call this if the users specifies some flag or clicks a button!
 
@@ -21,7 +22,7 @@ fn main() -> Result<(), eframe::Error> {
 
             ..Default::default()
         },
-        Box::new(|_cc| Box::<MyApp>::default()),
+        Box::new(|_cc| Ok(Box::<MyApp>::default())),
     )
 }
 
